@@ -41,7 +41,7 @@ pub fn train_warmstart<B: AutodiffBackend>(
     let ws_cfg = &cfg.warmstart;
     let mut init_params: Vec<Vec<f32>> = Vec::with_capacity(n_chains);
 
-    for chain_id in 0..n_chains {
+    for chain_id in 1..=n_chains {
         log::info!("Warmstart: training ensemble member {chain_id}/{n_chains}");
 
         let mut model = build_fcn::<B>(&cfg.model, device);
@@ -175,7 +175,7 @@ fn gaussian_nll_loss<B: AutodiffBackend>(logits: Tensor<B, 2>, y: Tensor<B, 1>) 
     let nll = (diff.powi_scalar(2) / sigma.clone().powi_scalar(2)) * 0.5
         + sigma.log()
         + (2.0 * std::f32::consts::PI).ln() * 0.5;
-    nll.mean().unsqueeze_dim(0)
+    nll.mean()
 }
 
 // ── Early stopping ────────────────────────────────────────────────────────────

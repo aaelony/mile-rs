@@ -145,7 +145,7 @@ impl<B: AutodiffBackend> BnnLogPosterior<B> {
         let log_lik = -(diff.clone().powi_scalar(2) / sigma.clone().powi_scalar(2)) * 0.5
             - sigma.log()
             - (2.0 * std::f32::consts::PI).ln() * 0.5;
-        log_lik.sum().unsqueeze_dim(0)
+        log_lik.sum()
     }
 
     /// Categorical cross-entropy: `logits` shape `[batch, n_classes]`.

@@ -76,6 +76,7 @@ pub fn nuts_sample_chain<M>(
     sampler_cfg: &crate::config::SamplerConfig,
     chain_id: usize,
     init_pos: &[f32],
+    seed: u64,
     pb: indicatif::ProgressBar,
 ) -> Result<Vec<Vec<f32>>, crate::MileError>
 where
@@ -88,8 +89,9 @@ where
     settings.num_tune = sampler_cfg.warmup_steps as u64;
     settings.maxdepth = sampler_cfg.nuts_max_depth;
 
-    // Use nuts_rs::rand (rand 0.10) for the RNG so trait bounds are satisfied.
-    let mut rng = nuts_rs::rand::rng();
+    // Seeded RNG using nuts-rs's re-exported rand 0.10 for reproducibility.
+    use nuts_rs::rand::{rngs::SmallRng, SeedableRng};
+    let mut rng = SmallRng::seed_from_u64(seed);
     let mut chain = settings.new_chain(chain_id as u64, math, &mut rng);
 
     let init_f64: Vec<f64> = init_pos.iter().map(|&x| f64::from(x)).collect();
