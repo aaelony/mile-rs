@@ -1,0 +1,48 @@
+experiment_name = "uci_regr_airfoil"
+seed            = 4
+backend         = "cpu"
+output_dir      = "results/tabular_regression/airfoil"
+
+# Regression: predict aerodynamic sound pressure level (dB)
+# NASA airfoil self-noise dataset (UCI)
+# 1503 rows, 5 features
+task = "regression"
+
+[data]
+path          = "../../data/airfoil.tsv"
+use_synthetic = false
+normalize     = true
+train_split   = 0.7
+valid_split   = 0.1
+test_split    = 0.2
+
+[model]
+# Airfoil: frequency, angle, chord length, velocity, displacement thickness
+input_dim        = 5
+hidden_structure = [64, 64, 2]   # 2 outputs: (mu, log_sigma) for Gaussian NLL
+use_bias         = true
+
+[warmstart]
+enabled       = true
+max_epochs    = 500
+batch_size    = 32
+learning_rate = 0.01
+patience      = 20
+
+[sampler]
+sampler                   = "mclmc"
+n_chains                  = 12
+n_samples                 = 5000
+n_thinning                = 5
+warmup_steps              = 20000
+step_size_init            = 0.01
+desired_energy_var_start  = 0.5
+desired_energy_var_end    = 0.1
+trust_in_estimate         = 1.5
+num_effective_samples     = 100
+diagonal_preconditioning  = false
+nuts_max_depth            = 10
+nuts_target_accept        = 0.80
+
+[sampler.prior]
+name = "StandardNormal"

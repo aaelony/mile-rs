@@ -1,0 +1,47 @@
+experiment_name = "diagnostics_mclmc"
+seed            = 42
+output_dir      = "results/diagnostics/mclmc"
+
+# Task: "regression" or { classification = { n_classes = N } }
+task = "regression"
+
+[data]
+# Path to a CSV where the last column is the label.
+# Relative to this file's directory.
+path             = "../../data/airfoil.csv"
+use_synthetic    = false   # set true (and remove path) to use synthetic Gaussian data
+normalize        = true
+train_split      = 0.7
+valid_split      = 0.1
+test_split       = 0.2
+# datapoint_limit = 5000   # uncomment to cap rows
+
+[model]
+input_dim        = 5
+hidden_structure = [8, 8, 8, 8, 8, 8, 2]
+use_bias         = true
+
+[warmstart]
+enabled       = true
+max_epochs    = 500
+batch_size    = 32
+learning_rate = 0.01
+patience      = 10
+
+[sampler]
+sampler                   = "mclmc"
+n_chains                  = 12
+n_samples                 = 10000
+n_thinning                = 10
+warmup_steps              = 50000
+step_size_init            = 0.001
+desired_energy_var_start  = 0.5
+desired_energy_var_end    = 0.1
+trust_in_estimate         = 1.5
+num_effective_samples     = 100
+diagonal_preconditioning  = false
+nuts_max_depth            = 10
+nuts_target_accept        = 0.80
+
+[sampler.prior]
+name = "StandardNormal"

@@ -1,0 +1,8 @@
+# Replication search: seed sweep for tabular regression experiments.
+#
+# Run each dataset experiment with each of these seeds to assess variance.
+# Pass the desired seed via the --seed flag:
+#   mile-rs --config airfoil.toml --seed 1
+#
+# Seeds used in the paper's replication study:
+seeds = [1, 2, 3, 4, 5]

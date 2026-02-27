@@ -1,0 +1,44 @@
+experiment_name = "uci_classif_australian"
+seed            = 4
+output_dir      = "results/tabular_classif/australian"
+
+# 2-class binary classification (credit approval)
+task = { classification = { n_classes = 2 } }
+
+[data]
+path        = "../../data/australian_proc.tsv"
+normalize   = false
+train_split = 0.4
+valid_split = 0.1
+test_split  = 0.5
+
+[model]
+# Australian credit dataset: 14 features
+input_dim        = 14
+hidden_structure = [32, 2]
+use_bias         = true
+
+[warmstart]
+enabled       = true
+max_epochs    = 500
+batch_size    = 32
+learning_rate = 0.01
+patience      = 20
+
+[sampler]
+sampler                   = "mclmc"
+n_chains                  = 12
+n_samples                 = 10000
+n_thinning                = 10
+warmup_steps              = 50000
+step_size_init            = 0.01
+desired_energy_var_start  = 0.5
+desired_energy_var_end    = 0.1
+trust_in_estimate         = 1.5
+num_effective_samples     = 100
+diagonal_preconditioning  = false
+nuts_max_depth            = 10
+nuts_target_accept        = 0.80
+
+[sampler.prior]
+name = "StandardNormal"

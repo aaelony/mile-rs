@@ -1,0 +1,45 @@
+[package]
+name = "mile-rs"
+version = "0.0.1"
+edition = "2024"
+description = "Microcanonical Langevin Ensembles (MILE) for Bayesian Neural Networks — pure Rust. Very ALPHA!"
+
+[dependencies]
+# Neural networks, autodiff, tensor ops
+burn = { version = "0.20.1", features = ["autodiff", "ndarray", "wgpu"] }
+
+# NUTS sampler (paper comparison baseline)
+nuts-rs = "0.17"
+
+# Parallel chain execution (replaces jax.pmap)
+rayon = "1.10"
+
+# RNG (rand 0.10 matches nuts-rs 0.17's internal rand version)
+rand = "0.10"
+rand_distr = "0.6"
+
+# Flat sample storage for ESS computation
+ndarray = "0.16"
+
+# Serialisation (configs, samples)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+serde_yaml = "0.9"
+
+# CLI argument parsing
+clap = { version = "4.5.60", features = ["derive"] }
+
+# Progress bars
+indicatif = "0.18.4"
+
+# Error handling
+thiserror = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[features]
+# Enable WebGPU backend for GPU acceleration (optional)
+wgpu = ["burn/wgpu"]
