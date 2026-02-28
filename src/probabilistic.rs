@@ -7,8 +7,9 @@
 
 use burn::{
     tensor::{
+        activation,
         backend::{AutodiffBackend, Backend},
-        Shape, Tensor, TensorData,
+        Int, Shape, Tensor, TensorData,
     },
 };
 use thiserror::Error;
@@ -127,6 +128,9 @@ impl<B: AutodiffBackend> BnnLogPosterior<B> {
         match self.task {
             Task::Regression => self.log_likelihood_regression(logits, y),
             Task::Classification { .. } => self.log_likelihood_classification(logits, y),
+            Task::CountRegression { dispersion } => {
+                self.log_likelihood_count_regression(logits, y, dispersion)
+            }
         }
     }
 
@@ -154,30 +158,67 @@ impl<B: AutodiffBackend> BnnLogPosterior<B> {
         logits: Tensor<B, 2>,
         y: Tensor<B, 1>,
     ) -> Tensor<B, 1> {
-        let [_batch, n_classes] = logits.dims();
-        // Capture device before any moves.
+        let [batch, _n_classes] = logits.dims();
         let device = logits.device();
-        // log_pmf = logits - logsumexp(logits, dim=-1, keepdim=True)
-        // sum_dim(1) in Burn keeps the dimension, so the result is already [batch, 1].
-        let lse = logits.clone().exp().sum_dim(1).log(); // [batch, 1]
-        let log_pmf = logits.clone() - lse; // [batch, n_classes] broadcasts against [batch, 1]
 
-        // Gather log_pmf at the true class indices
-        // y: [batch] of integer indices stored as f32 → cast to int for gather
-        let y_int = y.clone().into_data();
-        let indices: Vec<usize> = y_int
+        // Numerically stable log-softmax — stays in the autodiff graph.
+        let log_pmf = activation::log_softmax(logits, 1); // [batch, n_classes]
+
+        // Materialise only the label tensor (no gradients needed for y).
+        let indices: Vec<i64> = y
+            .into_data()
             .to_vec::<f32>()
             .expect("label to_vec failed")
             .iter()
-            .map(|&v| v as usize)
+            .map(|&v| v as i64)
             .collect();
-        let mut log_lik_val = 0.0f32;
-        let log_pmf_data: Vec<f32> = log_pmf.into_data().to_vec().expect("logpmf to_vec failed");
-        for (b, &cls) in indices.iter().enumerate() {
-            log_lik_val += log_pmf_data[b * n_classes + cls];
-        }
-        let data = TensorData::new(vec![log_lik_val], Shape::new([1]));
-        Tensor::from_data(data, &device)
+        let idx_data = TensorData::new(indices, Shape::new([batch, 1]));
+        let idx = Tensor::<B, 2, Int>::from_data(idx_data, &device);
+
+        // Gather per-example log-prob at true class: [batch, 1] → scalar.
+        // log_pmf is still in the autodiff graph, so gradients flow back to pos.
+        log_pmf.gather(1, idx).sum()
+    }
+
+    /// Negative-binomial log-likelihood for count data with fixed dispersion `r`.
+    ///
+    /// Network output `logits` has shape `[batch, 1]`; the single column is
+    /// `log(μ)` (log expected count).
+    ///
+    /// `log P(y | μ, r) = [lgamma(y+r) - lgamma(r) - lgamma(y+1) + r·ln(r)]`
+    ///                  `+ y·log(μ) - (y+r)·log(r+μ)`
+    ///
+    /// The bracket is a constant w.r.t. network parameters and is evaluated on
+    /// CPU via the rising-factorial identity `Γ(y+r)/Γ(r) = r·(r+1)···(r+y−1)`,
+    /// which avoids any external lgamma dependency.
+    /// The remaining two terms are differentiable Burn tensor ops.
+    fn log_likelihood_count_regression(
+        &self,
+        logits: Tensor<B, 2>,
+        y: Tensor<B, 1>,
+        r: f32,
+    ) -> Tensor<B, 1> {
+        let [batch, _] = logits.dims();
+        let device = logits.device();
+
+        // log_mu: [batch], stays in the autodiff graph.
+        let log_mu = logits.slice([0..batch, 0..1]).squeeze::<1>();
+        let mu = log_mu.clone().exp();
+
+        // Constant term (no network-parameter dependence): evaluated on CPU.
+        // lgamma(y+r) - lgamma(r) - lgamma(y+1) + r·ln(r) per example.
+        let y_vals: Vec<f32> = y.clone().into_data().to_vec::<f32>().expect("y to_vec");
+        let log_const: f32 = y_vals
+            .iter()
+            .map(|&yi| negbin_log_coeff(yi as u32, r) + r * r.ln())
+            .sum();
+
+        // Differentiable part: sum_i [y_i·log_mu_i - (y_i+r)·log(r+mu_i)]
+        let log_rmu = mu.add_scalar(r).log();                   // log(r+μ): [batch]
+        let diff = y.clone() * log_mu - y.add_scalar(r) * log_rmu; // [batch]
+
+        // Place the scalar constant on the same device so GPU execution is correct.
+        diff.sum() + Tensor::full([1], log_const, &device)
     }
 }
 
@@ -244,4 +285,19 @@ impl<B: AutodiffBackend> LogPosterior for BnnLogPosterior<B> {
 
         Ok((lp_val, grad_vec))
     }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// `lgamma(y+r) - lgamma(r) - lgamma(y+1)` for non-negative integer `y`, `r > 0`.
+///
+/// Uses the rising-factorial identity `Γ(y+r)/Γ(r) = r·(r+1)···(r+y−1)` to
+/// avoid any external lgamma dependency:
+///
+///   lgamma(y+r) - lgamma(r)  =  sum_{k=0}^{y-1} ln(r + k)
+///   lgamma(y+1)               =  sum_{k=1}^{y}   ln(k)          (= ln(y!))
+fn negbin_log_coeff(y: u32, r: f32) -> f32 {
+    let log_rising: f32 = (0..y).map(|k| (r + k as f32).ln()).sum();
+    let log_factorial: f32 = (1..=y).map(|k| (k as f32).ln()).sum();
+    log_rising - log_factorial
 }

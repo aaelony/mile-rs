@@ -148,10 +148,17 @@ impl Default for PriorConfig {
 // ── Task ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Task {
     Regression,
     Classification { n_classes: usize },
+    /// Negative-binomial count regression with fixed dispersion `r`.
+    ///
+    /// The network outputs a single logit interpreted as `log(μ)` (log expected count).
+    /// The dispersion parameter `r` is a fixed hyperparameter set in the config.
+    ///
+    /// TOML: `task = { count_regression = { dispersion = 10.0 } }`
+    CountRegression { dispersion: f32 },
 }
 
 // ── Warmstart ─────────────────────────────────────────────────────────────────
@@ -289,4 +296,10 @@ impl Default for MileConfig {
             output_dir: "results".into(),
         }
     }
+
 }
+
+
+
+
+

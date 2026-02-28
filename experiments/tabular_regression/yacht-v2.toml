@@ -1,0 +1,63 @@
+experiment_name = "uci_regr_yacht_v2"
+seed            = 4
+backend         = "cpu"
+output_dir      = "results/tabular_regression/yacht-v2"
+
+# Regression: predict residuary resistance of sailing yachts
+# Yacht hydrodynamics dataset (UCI, Gerritsma 1981)
+# 308 rows, 6 features
+#
+# v2 changes vs v1 (convergence improvements):
+#   - hidden_structure [64, 64, 2] → [32, 2]  (4738 → 226 params; avoids overparameterization)
+#   - warmup_steps 20000 → 50000              (more adaptation budget per dimension)
+#   - diagonal_preconditioning false → true   (adapts step size per parameter)
+#   - desired_energy_var_start 0.5 → 0.1      (more conservative steps)
+#   - desired_energy_var_end   0.1 → 0.01     (tighter final target)
+#   - n_thinning 5 → 10                       (reduce stored autocorrelation)
+#   - learning_rate 0.01 → 0.001              (more careful warmstart convergence)
+#   - prior: StandardNormal → Normal(0, 0.5)  (stronger regularisation)
+task = "regression"
+
+[data]
+path          = "../../data/yacht.tsv"
+use_synthetic = false
+normalize     = true
+train_split   = 0.7
+valid_split   = 0.1
+test_split    = 0.2
+
+[model]
+# Yacht: longitudinal position of center of buoyancy, prismatic coefficient,
+#        length-displacement ratio, beam-draught ratio,
+#        length-beam ratio, Froude number
+# [32, 2]: 6*32+32 + 32*2+2 = 224 + 66 = 290 params  (~1x training rows)
+input_dim        = 6
+hidden_structure = [32, 2]   # 2 outputs: (mu, log_sigma) for Gaussian NLL
+use_bias         = true
+
+[warmstart]
+enabled       = true
+max_epochs    = 500
+batch_size    = 32
+learning_rate = 0.001
+patience      = 20
+
+[sampler]
+sampler                   = "mclmc"
+n_chains                  = 12
+n_samples                 = 5000
+n_thinning                = 10
+warmup_steps              = 50000
+step_size_init            = 0.01
+desired_energy_var_start  = 0.1
+desired_energy_var_end    = 0.01
+trust_in_estimate         = 1.5
+num_effective_samples     = 100
+diagonal_preconditioning  = true
+nuts_max_depth            = 10
+nuts_target_accept        = 0.80
+
+[sampler.prior]
+name  = "Normal"
+loc   = 0.0
+scale = 0.5

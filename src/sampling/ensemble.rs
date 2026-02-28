@@ -325,9 +325,15 @@ where
 // ── Disk I/O ──────────────────────────────────────────────────────────────────
 
 fn save_chain(result: &ChainResult, dir: &Path) -> Result<(), MileError> {
-    let path: PathBuf = dir.join(format!("chain_{}.json", result.chain_id));
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+
+    let path: PathBuf = dir.join(format!("chain_{}.json.gz", result.chain_id));
+    let file = fs::File::create(&path)?;
+    let mut gz = GzEncoder::new(file, Compression::default());
     let json = serde_json::to_string(&result.samples)?;
-    fs::write(&path, json)?;
+    gz.write_all(json.as_bytes()).map_err(MileError::Io)?;
+    gz.finish().map_err(MileError::Io)?;
     log::info!("Chain {} saved to {}", result.chain_id, path.display());
     Ok(())
 }

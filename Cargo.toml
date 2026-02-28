@@ -33,6 +33,9 @@ clap = { version = "4.5.60", features = ["derive"] }
 # Progress bars
 indicatif = "0.18.4"
 
+# Gzip compression for chain sample files
+flate2 = "1"
+
 # Error handling
 thiserror = "1"
 

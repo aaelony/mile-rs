@@ -1,8 +1,10 @@
 # mile-rs
 
-Very Alpha - Use with extreme caution for experimental use only for now.
+Very Alpha - Do Not Use Yet.  
 
-The following is an attempt (very early and alpha) of porting of https://arxiv.org/html/2502.06335v1#S1 and Python repo https://github.com/EmanuelSommer/MILE to Rust .
+Much further work to be implemented and validated before viable.
+
+The idea is to attempt something like https://arxiv.org/html/2502.06335v1#S1 and Python repo https://github.com/EmanuelSommer/MILE in Rust.
 
 ## Citation
 

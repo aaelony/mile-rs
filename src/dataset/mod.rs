@@ -5,7 +5,7 @@
 
 use burn::tensor::{backend::Backend, Shape, Tensor, TensorData};
 use std::path::Path;
-
+use crate::config::MileConfig;
 
 // ── Tabular dataset ───────────────────────────────────────────────────────────
 
@@ -146,19 +146,40 @@ impl TabularDataset {
         Ok(())
     }
 
-    /// Random 80/10/10 train/valid/test split.
+    /// Split into train / validation / test using the fractions in `config.data`.
+    ///
+    /// Panics if either fraction is non-positive, either exceeds 1.0, or their
+    /// sum exceeds 1.0 (which would leave no rows for the test set).
     pub fn split_train_valid_test(
         self,
-        seed: u64,
+        config: &MileConfig,
     ) -> (TabularDataset, TabularDataset, TabularDataset) {
         use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
-        let mut rng = SmallRng::seed_from_u64(seed);
+
+        let train_frac = config.data.train_split;
+        let valid_frac = config.data.valid_split;
+        assert!(
+            train_frac > 0.0 && train_frac <= 1.0,
+            "data.train_split must be in (0, 1], got {train_frac}"
+        );
+        assert!(
+            valid_frac > 0.0 && valid_frac <= 1.0,
+            "data.valid_split must be in (0, 1], got {valid_frac}"
+        );
+        assert!(
+            train_frac + valid_frac <= 1.0,
+            "data.train_split ({train_frac}) + data.valid_split ({valid_frac}) = {} exceeds 1.0",
+            train_frac + valid_frac
+        );
+
+        let mut rng = SmallRng::seed_from_u64(config.seed);
         let n = self.len();
         let mut indices: Vec<usize> = (0..n).collect();
         indices.shuffle(&mut rng);
 
-        let n_train = (n as f32 * 0.8) as usize;
-        let n_valid = (n as f32 * 0.1) as usize;
+        let n_train = (n as f32 * train_frac) as usize;
+        let n_valid = (n as f32 * valid_frac) as usize;
+        let n_test = n - n_train - n_valid;
 
         let split = |idx: &[usize]| TabularDataset {
             features: idx.iter().map(|&i| self.features[i].clone()).collect(),
@@ -168,6 +189,14 @@ impl TabularDataset {
         let train = split(&indices[..n_train]);
         let valid = split(&indices[n_train..n_train + n_valid]);
         let test = split(&indices[n_train + n_valid..]);
+
+        log::info!(
+            "Total: {n}, train: {n_train} ({:.0}%), \
+             valid: {n_valid} ({:.0}%), test: {n_test} ({:.0}%)",
+            train_frac * 100.0,
+            valid_frac * 100.0,
+            (1.0 - train_frac - valid_frac) * 100.0,
+        );
 
         (train, valid, test)
     }

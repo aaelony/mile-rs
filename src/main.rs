@@ -270,7 +270,7 @@ where
         TabularDataset::from_csv(&data_path)?
     };
 
-    let (train_ds, valid_ds, _test_ds) = dataset.split_train_valid_test(cfg.seed);
+    let (train_ds, valid_ds, _test_ds) = dataset.split_train_valid_test(&cfg);
 
     let train_x = train_ds.features_tensor::<B>(&device);
     let train_y = train_ds.labels_tensor::<B>(&device);
@@ -326,6 +326,8 @@ where
 
     if diag.max_rhat > 1.01 {
         log::warn!("R-hat > 1.01 — chains may not have converged");
+        log::warn!("Max Rhat: {}, Mean ESS: {}", diag.max_rhat, diag.mean_ess);
+
     }
 
     log::info!("Done. Samples written to {}", output_dir.join("samples").display());

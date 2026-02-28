@@ -1,0 +1,71 @@
+experiment_name = "uci_regr_yacht_v3"
+seed            = 4
+backend         = "cpu"
+output_dir      = "results/tabular_regression/yacht-v3"
+
+# Regression: predict residuary resistance of sailing yachts
+# Yacht hydrodynamics dataset (UCI, Gerritsma 1981)
+# 308 rows structured as 5 hull configs × ~61 Froude number values
+#
+# v3 changes vs v2:
+#   - hidden_structure [32, 2] → [16, 16, 2]   (two thin layers, 290 → 418 params;
+#                                                captures nonlinear Froude relationship)
+#   - batch_size removed                         (full-batch: exact gradients on 247 rows)
+#   - max_epochs 500 → 1000                      (more budget for full-batch convergence)
+#   - patience 20 → 50                           (smoother early-stopping with full-batch)
+#   - train_split 0.7 → 0.8                      (more training rows: 215 → 247)
+#   - valid_split 0.1 → 0.1, test_split 0.2 → 0.1
+#   - step_size_init 0.01 → 0.001               (start close to adapted value)
+#   - trust_in_estimate 1.5 → 0.5               (conservative L updates)
+#   - num_effective_samples 100 → 200            (more reliable ESS-based L refinement)
+#   - n_chains 12 → 16                           (more chains for reliable R-hat / ESS)
+#
+# Remaining items requiring data preprocessing (not config-addressable):
+#   - Structured test split: hold out 1 complete hull config (not a random split)
+#   - Log-transform target: ln(resistance) makes Gaussian NLL assumption more appropriate
+#     given the 0.01–62.42 range (~6000x span, right-skewed)
+task = "regression"
+
+[data]
+path          = "../../data/yacht.tsv"
+use_synthetic = false
+normalize     = true
+train_split   = 0.8
+valid_split   = 0.1
+test_split    = 0.1
+
+[model]
+# Yacht: longitudinal position of center of buoyancy, prismatic coefficient,
+#        length-displacement ratio, beam-draught ratio,
+#        length-beam ratio, Froude number
+# [16, 16, 2]: 6*16+16 + 16*16+16 + 16*2+2 = 112 + 272 + 34 = 418 params (~1.7x training rows)
+input_dim        = 6
+hidden_structure = [16, 16, 2]   # 2 outputs: (mu, log_sigma) for Gaussian NLL
+use_bias         = true
+
+[warmstart]
+enabled       = true
+max_epochs    = 1000
+# batch_size omitted → full-batch gradient descent (exact gradients on all ~247 training rows)
+learning_rate = 0.001
+patience      = 50
+
+[sampler]
+sampler                   = "mclmc"
+n_chains                  = 16
+n_samples                 = 5000
+n_thinning                = 10
+warmup_steps              = 50000
+step_size_init            = 0.001
+desired_energy_var_start  = 0.1
+desired_energy_var_end    = 0.01
+trust_in_estimate         = 0.5
+num_effective_samples     = 200
+diagonal_preconditioning  = true
+nuts_max_depth            = 10
+nuts_target_accept        = 0.80
+
+[sampler.prior]
+name  = "Normal"
+loc   = 0.0
+scale = 0.5

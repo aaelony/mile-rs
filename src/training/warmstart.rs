@@ -15,12 +15,31 @@ use burn::{
         Shape, Tensor, TensorData,
     },
 };
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::{
     config::{MileConfig, Task, WarmstartConfig},
     models::fcn::{build_fcn, FcnModule},
     MileError,
 };
+
+// ── Progress bar styles ───────────────────────────────────────────────────────
+
+fn member_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "warmstart [{elapsed_precise}] {bar:40.green/dim} {pos}/{len} members  {msg}",
+    )
+    .unwrap()
+    .progress_chars("=>-")
+}
+
+fn epoch_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "  member {prefix} [{bar:35.cyan/dim}] epoch {pos}/{len}  {msg}",
+    )
+    .unwrap()
+    .progress_chars("=>-")
+}
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -41,8 +60,14 @@ pub fn train_warmstart<B: AutodiffBackend>(
     let ws_cfg = &cfg.warmstart;
     let mut init_params: Vec<Vec<f32>> = Vec::with_capacity(n_chains);
 
+    let mp = MultiProgress::new();
+    let outer = mp.add(ProgressBar::new(n_chains as u64));
+    outer.set_style(member_style());
+
     for chain_id in 1..=n_chains {
-        log::info!("Warmstart: training ensemble member {chain_id}/{n_chains}");
+        let epoch_pb = mp.insert_after(&outer, ProgressBar::new(ws_cfg.max_epochs as u64));
+        epoch_pb.set_style(epoch_style());
+        epoch_pb.set_prefix(format!("{chain_id}/{n_chains}"));
 
         let mut model = build_fcn::<B>(&cfg.model, device);
         let optim_cfg = AdamConfig::new().with_epsilon(1e-8);
@@ -58,12 +83,16 @@ pub fn train_warmstart<B: AutodiffBackend>(
             valid_x,
             valid_y,
             device,
+            &epoch_pb,
         )?;
 
-        log::info!("Warmstart: member {chain_id} done, {d} params", d = flat.len());
+        epoch_pb.finish_and_clear();
+        outer.inc(1);
+        outer.set_message(format!("({} params)", flat.len()));
         init_params.push(flat);
     }
 
+    outer.finish_with_message("done");
     Ok(init_params)
 }
 
@@ -79,6 +108,7 @@ fn train_member<B: AutodiffBackend>(
     valid_x: &Tensor<B, 2>,
     valid_y: &Tensor<B, 1>,
     device: &B::Device,
+    pb: &ProgressBar,
 ) -> Result<Vec<f32>, MileError> {
     let mut valid_losses: Vec<f32> = Vec::new();
 
@@ -97,13 +127,14 @@ fn train_member<B: AutodiffBackend>(
         let val_loss = compute_loss_inner::<B>(val_logits, valid_y.clone().inner(), task, device);
         valid_losses.push(val_loss);
 
-        if epoch % 50 == 0 {
-            log::debug!("  epoch {epoch} | val_loss = {val_loss:.4}");
+        pb.inc(1);
+        if epoch % 10 == 0 {
+            pb.set_message(format!("val={val_loss:.4}"));
         }
 
         // ── Early stopping ────────────────────────────────────────────────────
         if early_stop(&valid_losses, cfg.patience) {
-            log::info!("  Early stop at epoch {epoch}");
+            pb.set_message(format!("stopped  val={val_loss:.4}"));
             break;
         }
     }
@@ -137,6 +168,7 @@ fn compute_loss<B: AutodiffBackend>(
                 .init(device)
                 .forward(logits, targets)
         }
+        Task::CountRegression { dispersion } => negbin_nll_loss(logits, y, *dispersion),
     }
 }
 
@@ -162,6 +194,16 @@ fn compute_loss_inner<B: AutodiffBackend>(
             // For validation we use MSE on probabilities as a proxy.
             0.0 // TODO: implement proper validation loss for classification
         }
+        Task::CountRegression { dispersion } => {
+            let r = *dispersion;
+            let [batch, _] = logits.dims();
+            let log_mu = logits.slice([0..batch, 0..1]).squeeze::<1>();
+            let mu = log_mu.clone().exp();
+            let log_rmu = mu.add_scalar(r).log();
+            let nll = (y.clone().add_scalar(r) * log_rmu - y * log_mu).mean();
+            let data = nll.into_data();
+            data.to_vec::<f32>().unwrap_or_default().first().copied().unwrap_or(0.0)
+        }
     }
 }
 
@@ -176,6 +218,19 @@ fn gaussian_nll_loss<B: AutodiffBackend>(logits: Tensor<B, 2>, y: Tensor<B, 1>) 
         + sigma.log()
         + (2.0 * std::f32::consts::PI).ln() * 0.5;
     nll.mean()
+}
+
+/// Negative-binomial NLL for warmstart: logits `[batch, 1]` = log_mu.
+///
+/// Constant terms (lgamma) are omitted here because they don't affect gradients.
+/// The full constant is added inside `BnnLogPosterior::log_likelihood_count_regression`
+/// for correct energy values during MCMC.
+fn negbin_nll_loss<B: AutodiffBackend>(logits: Tensor<B, 2>, y: Tensor<B, 1>, r: f32) -> Tensor<B, 1> {
+    let [batch, _] = logits.dims();
+    let log_mu = logits.slice([0..batch, 0..1]).squeeze::<1>();
+    let mu = log_mu.clone().exp();
+    let log_rmu = mu.add_scalar(r).log();           // log(r + mu_i)
+    (y.clone().add_scalar(r) * log_rmu - y * log_mu).mean()
 }
 
 // ── Early stopping ────────────────────────────────────────────────────────────
